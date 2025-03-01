@@ -5,8 +5,15 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-// bot.use(session({ defaultSession: () => ({ waitingForData: false }) }));
-bot.use(session({ defaultSession: () => ({ waitingForData: false }) }));
+bot.use(
+  session({
+    defaultSession: () => ({
+      waitingForData: false,
+      quiz: false,
+      quizData: [],
+    }),
+  })
+);
 const url = "https://render-test-xooq.onrender.com";
 // const url = "http://127.0.0.1:3000";
 
@@ -35,6 +42,24 @@ async function sendNewWord(str) {
   });
 }
 
+async function quizPrep(data) {
+  const words = data.map((word) => word.ru).join(", ");
+  return words;
+}
+
+async function checkQuiz(answerStr, ctx) {
+  const quizData = ctx.session.quizData;
+  const answers = answerStr.split(",").map((e) => e.trim());
+  let result = 0;
+  const res = quizData.map((word, i) => {
+    const { en, ru } = word;
+    const check = en === answers[i];
+    result = check ? (result += 1) : result;
+    return `${ru} - ${answers[i]} ${check ? `✅` : `❌(${en})`}`;
+  });
+  return `${res.join("\n")}\nResult: ${result}/${quizData.length}`;
+}
+
 //реагирует на слеш /команда
 
 bot.start((ctx) => ctx.reply("Welcome"));
@@ -53,7 +78,13 @@ bot.hears("Показать все слова", async (ctx) => {
 });
 
 bot.hears("Квиз", async (ctx) => {
-  ctx.reply("квиз, 🫡");
+  const data = await fetch(`${url}/api/quiz`, { method: "get" });
+  const jsonData = (await data.json()).data;
+  ctx.session.quizData = jsonData;
+  ctx.session.quiz = true;
+  ctx.reply(
+    `напиши эти слова на английском, через запятую\n${await quizPrep(jsonData)}`
+  );
 });
 
 bot.hears("Добавить слово", async (ctx) => {
@@ -64,8 +95,14 @@ bot.hears("Добавить слово", async (ctx) => {
 bot.on(message("text"), async (ctx, next) => {
   if (ctx.session.waitingForData) {
     const data = ctx.update.message.text;
-    await sendNewWord(data, ctx);
+    await sendNewWord(data);
     ctx.session.waitingForData = false;
+    ctx.reply(`Слово ${data} добавлено, спасибо`);
+  } else if (ctx.session.quiz) {
+    const data = ctx.update.message.text;
+    const res = await checkQuiz(data, ctx);
+    ctx.session.waitingForData = false;
+    ctx.reply(res);
   } else {
     next();
   }
